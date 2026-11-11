@@ -17,7 +17,7 @@ concurrency:
 jobs:
   sonarcloud:
     # Tracked at @main so org-wide CI improvements propagate without PR churn.
-    uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@sonarcloud/node-coverage
+    uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@main
     with:
       node-coverage-script: test:coverage
     secrets: inherit
