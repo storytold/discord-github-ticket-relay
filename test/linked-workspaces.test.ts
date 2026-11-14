@@ -1,10 +1,12 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createLinkedWorkspace, listLinked } from '../src/domain/linked.js';
 import { checkPanel, publishPanel } from '../src/domain/panel.js';
 import { createApp, getDiscordConnection, getGitHubConnection, getPanel, saveGitHubConnection } from '../src/domain/store.js';
 import type { AppRow, WorkspaceRow } from '../src/domain/types.js';
 import { acceptInvite, createInvite, getMembership, getWorkspace, listMemberships, setMemberActions, setMyTickets } from '../src/domain/workspaces.js';
-import { form, get, grant, makeAdmin, makeApp, makeWorkspace, member, modalSubmit, nextInteractionId, resetDb, sendInteraction, testDb, type Admin, type ConfiguredWorkspace, type TestEnv } from './helpers.js';
+import { form, get, grant, makeAdmin, makeApp, makeWorkspace, member, modalSubmit, nextInteractionId, resetDb, sendInteraction, TEST_FILES_DIR, testDb, type Admin, type ConfiguredWorkspace, type TestEnv } from './helpers.js';
 
 let env: TestEnv;
 let main: ConfiguredWorkspace;
@@ -427,5 +429,63 @@ describe('Install links', () => {
     const second = await makeLink(linked);
     await env.server.inject({ method: 'POST', url: `/w/${linked.id}/setup/github/share/revoke`, ...form(main.owner) });
     expect((await env.server.inject({ method: 'GET', url: `/github/connect/${second}` })).body).toContain('doesn’t work anymore');
+  });
+});
+
+describe('Deleting a workspace', () => {
+  const settings = (ws: WorkspaceRow | ConfiguredWorkspace['workspace'], who: Admin = main.owner) => env.server.inject({ method: 'GET', url: `/w/${ws.id}/settings`, ...get(who) });
+  const remove = (ws: { id: string }, name: string, who: Admin = main.owner) => env.server.inject({ method: 'POST', url: `/w/${ws.id}/settings/delete`, ...form(who, { confirm_name: name }) });
+  const flash = (res: { cookies: { name: string; value: string }[] }) => (JSON.parse(Buffer.from(res.cookies.find((c) => c.name === 'tr_flash')!.value, 'base64url').toString()) as { message: string }).message;
+
+  it('is for the owner, needs the name typed, and waits for a main’s linked workspaces', async () => {
+    const admin = await join('admin');
+    expect((await settings(main.workspace, admin)).body).not.toContain('Delete workspace');
+    expect((await remove(main.workspace, main.workspace.name, admin)).statusCode).toBe(403);
+
+    const page = (await settings(main.workspace)).body;
+    expect(page).toContain('<h2>Delete workspace</h2>');
+    expect(page).toContain('Delete its linked workspaces first: ');
+    expect(page).not.toContain('name="confirm_name"');
+    const blocked = await remove(main.workspace, main.workspace.name);
+    expect(flash(blocked)).toBe('Delete its linked workspaces first: Mailcraft.');
+    expect(await getWorkspace(env.db, main.workspace.id)).not.toBeNull();
+
+    expect((await settings(linked)).body).toContain('data-must-match="Mailcraft"');
+    const wrong = await remove(linked, 'mailcraft');
+    expect(flash(wrong)).toBe('Type Mailcraft exactly to delete it.');
+    expect(await getWorkspace(env.db, linked.id)).not.toBeNull();
+
+    // A linked workspace on its main's panel: back to the main, whose posted menu needs publishing.
+    const done = await remove(linked, '  Mailcraft ');
+    expect(done.headers.location).toBe(`/w/${main.workspace.id}/settings#linked`);
+    expect(flash(done)).toBe(`Mailcraft was deleted. Publish ${main.workspace.name}’s panel to take its apps off the menu.`);
+    expect(await getWorkspace(env.db, linked.id)).toBeNull();
+    expect((await env.db.query('SELECT count(*) AS n FROM apps WHERE workspace_id = $1', [linked.id])).rows[0]).toMatchObject({ n: 0 });
+    expect((await settings(main.workspace)).body).toContain('name="confirm_name"');
+  });
+
+  it('takes down its panel and removes its files and tickets', async () => {
+    await env.db.query('DELETE FROM workspaces WHERE id = $1', [linked.id]);
+    await publishPanel(env.deps, main.workspace.id, null);
+    const panel = (await getPanel(env.db, main.workspace.id))!;
+    expect(env.discord.messages.has(panel.message_id)).toBe(true);
+    await sendInteraction(env, { ...modalSubmit(main, main.apps[0]!, { title: 'Export crashes', description: 'Every time I export.' }), member: member(ALEX, 'Alex') });
+    await env.worker.drain();
+    const sub = (await env.db.query('SELECT id FROM submissions WHERE workspace_id = $1', [main.workspace.id])).rows[0] as { id: string };
+    await env.db.query(`INSERT INTO ticket_files (id, workspace_id, submission_id, source, filename, size, status, kind, ext, content_type) VALUES ('DELETEMEDELETEMEDELETE', $1, $2, 'member', 'shot.png', 4, 'stored', 'image', 'png', 'image/png')`, [main.workspace.id, sub.id]);
+    mkdirSync(TEST_FILES_DIR, { recursive: true });
+    const file = path.join(TEST_FILES_DIR, 'DELETEMEDELETEMEDELETE.png');
+    writeFileSync(file, 'png!');
+
+    const res = await remove(main.workspace, main.workspace.name);
+    expect(res.headers.location).toBe('/');
+    expect(await getWorkspace(env.db, main.workspace.id)).toBeNull();
+    expect(env.discord.messages.has(panel.message_id)).toBe(false);
+    expect(existsSync(file)).toBe(false);
+    for (const table of ['submissions', 'ticket_files', 'apps', 'workspace_members', 'panels']) {
+      expect([table, (await env.db.query(`SELECT count(*) AS n FROM ${table} WHERE workspace_id = $1`, [main.workspace.id])).rows[0]]).toEqual([table, { n: 0 }]);
+    }
+    // The owner has no workspaces left.
+    expect((await env.server.inject({ method: 'GET', url: '/', ...get(main.owner) })).headers.location).toBe('/workspaces');
   });
 });

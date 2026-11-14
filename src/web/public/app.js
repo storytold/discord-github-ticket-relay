@@ -895,6 +895,17 @@
     syncFollowers();
   }
 
+  // Settings › Delete workspace: the button works once the name is typed exactly (the server checks it too).
+  $$('input[data-must-match]').forEach(function (input) {
+    var form = input.closest('form');
+    var sync = function () {
+      var ok = input.value.replace(/\s+/g, ' ').trim() === input.getAttribute('data-must-match').replace(/\s+/g, ' ').trim();
+      $$('[data-match-enable]', form).forEach(function (b) { b.disabled = !ok; });
+    };
+    input.addEventListener('input', sync);
+    sync();
+  });
+
   // "Reset to default" puts each field's default (its placeholder) back.
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-reset-fields]');

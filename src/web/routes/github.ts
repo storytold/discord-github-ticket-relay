@@ -16,7 +16,7 @@ import { avatar, badge, choices, copyField, csrfField, empty, icon, linkBtn, men
 import { setFlash } from '../session.js';
 import type { Web } from '../server.js';
 
-function installationSettingsUrl(conn: { account_login: string; account_type: string; installation_id: number }): string {
+export function installationSettingsUrl(conn: { account_login: string; account_type: string; installation_id: number }): string {
   return conn.account_type === 'Organization'
     ? `https://github.com/organizations/${encodeURIComponent(conn.account_login)}/settings/installations/${conn.installation_id}`
     : `https://github.com/settings/installations/${conn.installation_id}`;

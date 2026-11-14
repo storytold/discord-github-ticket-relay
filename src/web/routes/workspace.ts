@@ -8,6 +8,7 @@ import { getDiscordConnection, getGitHubConnection, listApps } from '../../domai
 import { countByStatus, decryptPayload, filedThisWeek } from '../../domain/submissions.js';
 import { UserFacingError, type AppRow, type DiscordConnectionRow, type SubmissionStatus } from '../../domain/types.js';
 import { createLinkedWorkspace, listLinked, mainOf, MAIN_ONLY_TOOLS, panelOwnerId } from '../../domain/linked.js';
+import { deleteWorkspace } from '../../domain/delete-workspace.js';
 import { getWorkspace, updateWorkspaceGeneral, userNames } from '../../domain/workspaces.js';
 import { html, raw, type SafeHtml } from '../../lib/html.js';
 import type { LogDetail, TriageAction } from '../../triage/engine.js';
@@ -42,6 +43,7 @@ import {
   type IconName,
 } from '../ui.js';
 import { claudeCard, keyPill, keyStatus, keySummary } from './claude.js';
+import { installationSettingsUrl } from './github.js';
 import { areaHref, canOpen, canOpenIssue, firstPage, panelPill, repoSyncState, TOOL_ICONS, type ToolName } from './tool.js';
 
 // ---- Overview -----------------------------------------------------------------------------------
@@ -671,8 +673,62 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
         </div></div>
       </form>
       ${await linkedCard(ctx)}
-      ${await claudeCard(web, ctx)}`;
+      ${await claudeCard(web, ctx)}
+      ${ctx.role === 'owner' ? await deleteCard(ctx) : ''}`;
     return web.render(reply, ctx, 'Settings', 'settings', body);
+  });
+
+  /** The owner deletes the workspace: what goes and what stays, then its name typed to confirm. */
+  async function deleteCard(ctx: WorkspaceRequestContext): Promise<SafeHtml> {
+    const ws = ctx.workspace;
+    const [main, linked, gh, conn] = await Promise.all([mainOf(deps.db, ws), listLinked(deps.db, ws.id), getGitHubConnection(deps.db, ws.id), getDiscordConnection(deps.db, ws.id)]);
+    const discord = main
+      ? ws.on_main_panel
+        ? `Its apps leave ${main.name}’s ticket panel. Its tickets leave My tickets there.`
+        : 'Its ticket panel is taken down.'
+      : html`Its ticket panel, contributor roles panel, known-issues board and update-pings message are taken down. Release posts stay.${conn ? ` The bot stays in ${conn.guild_name ?? 'your server'}; remove it there if nothing else uses it.` : ''}`;
+    const github = gh
+      ? html`Its issues stay on GitHub, but screenshots added from here stop loading. The GitHub App stays installed on <a href="${installationSettingsUrl(gh)}" target="_blank" rel="noopener noreferrer">${gh.account_login}</a> until you uninstall it there.`
+      : 'Nothing: it has no GitHub connection.';
+    const blocked = linked.length > 0;
+    return html`<form method="post" action="${ctx.base}/settings/delete" class="card" id="delete">
+      ${csrfField(ctx.csrf)}
+      <div class="card-h"><div><h2>Delete workspace</h2><div class="desc">Deletes ${ws.name} and everything in it, for everyone. This can’t be undone.</div></div></div>
+      ${setting('Deleted', null, html`<span class="value">Its apps, tickets, ticket types, AI triage, moderation history, analytics, files and settings. Everyone loses access to it.</span>`, { stacked: true })}
+      ${setting('Discord', null, html`<span class="value">${discord}</span>`, { stacked: true })}
+      ${setting('GitHub', null, html`<span class="value">${github}</span>`, { stacked: true })}
+      <div class="card-f linked-new">
+        ${blocked
+          ? html`<span class="small muted grow">Delete its linked workspaces first: ${linked.map((l, i) => html`${i ? ', ' : ''}<a href="/w/${l.id}/settings#delete">${l.name}</a>`)}.</span>`
+          : html`<label class="sr-only" for="delete-name">Type ${ws.name} to confirm</label>
+            <input id="delete-name" type="text" name="confirm_name" placeholder="Type ${ws.name} to confirm" autocomplete="off" spellcheck="false" maxlength="80" required data-must-match="${ws.name}">`}
+        <div class="end">${submitBtn('Delete workspace', { variant: 'danger-solid', icon: 'trash-2', loading: 'Deleting…', disabled: true, attrs: raw('data-match-enable') })}</div>
+      </div>
+    </form>`;
+  }
+
+  /** Owner only. The typed name has to match, and a main's linked workspaces go first. */
+  app.post('/w/:wid/settings/delete', async (req, reply) => {
+    const ctx = await web.requireWorkspace(req, reply, { permission: 'members' });
+    if (!ctx) return reply;
+    const ws = ctx.workspace;
+    const typed = String((req.body as { confirm_name?: string }).confirm_name ?? '').replace(/\s+/g, ' ').trim();
+    if (typed !== ws.name.replace(/\s+/g, ' ').trim()) {
+      setFlash(reply, 'error', `Type ${ws.name} exactly to delete it.`);
+      return reply.redirect(`${ctx.base}/settings#delete`);
+    }
+    const main = await mainOf(deps.db, ws);
+    try {
+      await deleteWorkspace(deps, ws.id);
+    } catch (err) {
+      if (!(err instanceof UserFacingError)) throw err;
+      setFlash(reply, 'error', err.message);
+      return reply.redirect(`${ctx.base}/settings#delete`);
+    }
+    // A linked workspace's apps were on its main's panel: a menu in the posted panel needs publishing.
+    const republish = main && ws.on_main_panel && !main.my_tickets ? ` Publish ${main.name}’s panel to take its apps off the menu.` : '';
+    setFlash(reply, 'success', `${ws.name} was deleted.${republish}`);
+    return reply.redirect(main ? `/w/${main.id}/settings#linked` : '/');
   });
 
   /**

@@ -274,6 +274,11 @@ Discord endpoint, OAuth), one or more queue workers, and an optional triage work
   Announcements) redirect: 301 for GET, 307 for forms.
 - Workspace creation is limited to `PLATFORM_ADMIN_DISCORD_IDS`. If that list is empty, only the
   first user of a fresh deployment can create one. `OPEN_WORKSPACE_CREATION=true` lifts the limit.
+- The owner deletes a workspace from Settings by typing its name (`src/domain/delete-workspace.ts`).
+  Its rows go with it (every workspace table cascades); the messages the bot keeps up to date in
+  Discord (ticket panel, contributor roles panel, known-issues board, update-pings panel) are
+  deleted and its stored files removed from disk. Release posts and GitHub issues stay. A main
+  with linked workspaces can't be deleted until they are.
 
 ## Ticket lifecycle
 
