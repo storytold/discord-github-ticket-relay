@@ -619,7 +619,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
       },
       {
         state: p.discord, icon: 'message-circle', name: 'Discord', href: `${b}/setup/discord`, cta: 'Connect Discord',
-        detail: dc ? `${dc.guild_name} · ${dc.status === 'active' ? 'bot ready' : 'bot removed'}${usesMainServer(ctx.workspace) ? ' · from the main workspace' : ''}` : ctx.workspace.parent_id ? 'The main workspace connects Discord, or connect a server of its own.' : 'Add the bot to your Discord server.',
+        detail: dc ? `${dc.guild_name} · ${dc.status === 'active' ? 'bot ready' : 'bot removed'}${usesMainServer(ctx.workspace) ? ' · from the main workspace' : ''}` : ctx.workspace.parent_id ? 'The main workspace connects Discord.' : 'Add the bot to your Discord server.',
       },
       {
         state: p.apps, icon: 'boxes', name: 'Apps & repositories', href: `${b}/apps`, cta: 'Add apps',
@@ -753,7 +753,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
     const github = await Promise.all(linked.map((l) => getGitHubConnection(deps.db, l.id)));
     const rows = linked.map((l, i) => {
       const gh = github[i];
-      const where = !usesMainServer(l) ? `Its own server${l.on_main_panel ? ` · also on ${ws.name}’s panel` : ''}` : l.on_main_panel ? `On ${ws.name}’s panel` : 'Its own panel';
+      const where = !usesMainServer(l) ? `Separate server${l.on_main_panel ? ` · also on ${ws.name}’s panel` : ''}` : l.on_main_panel ? `On ${ws.name}’s panel` : 'Its own panel';
       return html`<a class="line setup-row" href="/w/${l.id}">${icon('corner-down-right', 16, 'muted')}<span class="grow"><span class="name">${l.name}</span><span class="small muted"> · ${gh ? `GitHub: ${gh.account_login}` : 'GitHub not connected'} · ${where}</span></span>${icon('chevron-right', 16, 'muted')}</a>`;
     });
     return html`<div class="card" id="linked">

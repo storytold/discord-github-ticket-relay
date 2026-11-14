@@ -52,7 +52,7 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
       const own = !ctx.workspace.on_main_panel;
       const name = ctx.workspace.name;
       const link = currentDiscordLink(deps, ctx.workspace);
-      const publicBot = 'Discord only lets them add the bot while Public Bot is on (Developer Portal › your app › Bot).';
+      const publicBot = 'Others can only add the bot while Public Bot is on in the Discord Developer Portal.';
       const body = html`
         ${pageHeader({ eyebrow: 'Setup · Step 2 of 3', title: 'Discord', after: !conn ? pill('Not connected', 'neutral') : conn.status === 'active' ? pill('Connected', 'ok') : pill('Bot removed', 'danger'), description: `${name} uses ${main.name}’s Discord server. It’s connected and changed there.` })}
         ${!deps.discord ? notice('warn', 'The Discord application isn’t registered for this deployment yet', 'Whoever runs the server needs to finish the deployment setup first.') : ''}
@@ -64,17 +64,17 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
           ${setting('Ticket panel', null, html`<span class="value">${own ? (conn?.tickets_channel_name ? `Its own, in #${conn.tickets_channel_name}` : 'Its own, no channel chosen yet') : `On ${main.name}’s panel`}</span>${linkBtn(`${b}/tickets/panel`, 'Open', { variant: 'ghost', size: 'sm', trail: 'arrow-right' })}`)}
         </div>
         <div class="card" id="own-server">
-          <div class="card-h"><div><h2>Its own Discord server</h2><div class="desc">For a community with a server of its own. ${name} gets a ticket panel there that lists only its apps, and its own contributor roles, announcements and bot features. Nothing there reaches ${main.name}’s server. Its apps can stay on ${main.name}’s panel too.</div></div>
-            ${deps.discord ? linkBtn(`${b}/setup/discord?change=1`, 'Choose a server you manage', { size: 'sm', variant: 'ghost', trail: 'arrow-right' }) : ''}</div>
+          <div class="card-h"><div><h2>Separate server</h2><div class="desc">Run ${name}’s ticket panel and Discord tools in a different server, showing only its apps.</div></div>
+            ${deps.discord ? linkBtn(`${b}/setup/discord?change=1`, 'Choose a server', { size: 'sm', variant: 'ghost', trail: 'arrow-right' }) : ''}</div>
           ${link
-            ? html`<div class="card-b"><div class="field"><label for="discord-link-url">Link for the server’s admin</label>${copyField('discord-link-url', web.publicUrl(`/discord/connect/${link.token}`), 'Discord link')}
-                <div class="hint">Expires ${timeAgo(link.expiresAt)}. Send it privately, for example in a Discord DM. ${publicBot}</div></div></div>
+            ? html`<div class="card-b"><div class="field"><label for="discord-link-url">Setup link</label>${copyField('discord-link-url', web.publicUrl(`/discord/connect/${link.token}`), 'Setup link')}
+                <div class="hint">Works once and expires ${timeAgo(link.expiresAt)}. ${publicBot}</div></div></div>
               <div class="card-f plain"><span></span><div class="end">
-                ${postBtn(`${b}/setup/discord/share/revoke`, 'Stop this link', ctx.csrf, { variant: 'ghost', icon: 'link-2-off' })}
-                ${postBtn(`${b}/setup/discord/share`, 'Make a new link', ctx.csrf, { icon: 'refresh-cw', disabled: !deps.discord })}
+                ${postBtn(`${b}/setup/discord/share/revoke`, 'Revoke link', ctx.csrf, { variant: 'ghost', icon: 'link-2-off' })}
+                ${postBtn(`${b}/setup/discord/share`, 'New link', ctx.csrf, { icon: 'refresh-cw', disabled: !deps.discord })}
               </div></div>`
-            : html`<div class="card-f plain"><span class="small muted">Someone else runs the server? Send them a link: they add the bot and pick their server, without an account here. It works once and expires after ${DISCORD_LINK_DAYS} days.</span>
-                <div class="end">${postBtn(`${b}/setup/discord/share`, 'Create a link', ctx.csrf, { icon: 'link', disabled: !deps.discord })}</div></div>`}
+            : html`<div class="card-f plain"><span class="small muted">Don’t manage the server? Create a setup link for someone who does. It works once and expires after ${DISCORD_LINK_DAYS} days.</span>
+                <div class="end">${postBtn(`${b}/setup/discord/share`, 'Create setup link', ctx.csrf, { icon: 'link', disabled: !deps.discord })}</div></div>`}
         </div>`;
       return web.render(reply, ctx, 'Discord', 'discord', body);
     }
@@ -95,7 +95,7 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
         claimed = new Map(rows.map((r) => [r.guild_id, r.workspace_id]));
       }
       picker = html`<div class="card">
-        <div class="card-h"><div><h2>${main ? `Choose ${ctx.workspace.name}’s own server` : 'Choose your Discord server'}</h2><div class="desc">You need the Manage Server permission. Adding the bot opens Discord, where you confirm the server and the bot’s permissions.</div></div>${changing && conn ? linkBtn(`${b}/setup/discord`, 'Cancel', { size: 'sm', variant: 'ghost' }) : ''}</div>
+        <div class="card-h"><div><h2>${main ? 'Choose a server' : 'Choose your Discord server'}</h2><div class="desc">You need the Manage Server permission. Adding the bot opens Discord, where you confirm the server and the bot’s permissions.</div></div>${changing && conn ? linkBtn(`${b}/setup/discord`, 'Cancel', { size: 'sm', variant: 'ghost' }) : ''}</div>
         ${mine === null
           ? html`<div class="card-b">${notice('info', 'Your server list isn’t available right now', 'Sign out and in again to refresh it. You can still add the bot and pick the server in Discord.')}</div>`
           : mine.length === 0
@@ -152,7 +152,7 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
 
     // A linked workspace with its own server goes back to its main's instead of disconnecting.
     const leave = main
-      ? { post: `${b}/setup/discord/disconnect`, label: `Go back to ${main.name}’s server…`, icon: 'unplug' as const, danger: true, confirm: { title: `Stop using ${conn?.guild_name ?? 'this server'}?`, body: `Its panels there are taken down and ${ctx.workspace.name} uses ${main.name}’s server again, with its apps on ${main.name}’s panel. Contributor roles, announcements and bot features are hidden again; their settings are kept.`, label: 'Go back', danger: true } }
+      ? { post: `${b}/setup/discord/disconnect`, label: `Switch to ${main.name}’s server…`, icon: 'unplug' as const, danger: true, confirm: { title: `Switch to ${main.name}’s server?`, body: `${ctx.workspace.name}’s panels are removed from ${conn?.guild_name ?? 'its server'} and its apps move to ${main.name}’s panel. Contributor roles, announcements and bot features are turned off, but their settings are kept.`, label: 'Switch', danger: true } }
       : { post: `${b}/setup/discord/disconnect`, label: 'Disconnect Discord…', icon: 'unplug' as const, danger: true, confirm: { title: 'Disconnect Discord?', body: 'The ticket panel is removed and members can’t open tickets until you reconnect. History is kept.', label: 'Disconnect', danger: true } };
     const body = html`
       ${pageHeader({
@@ -162,8 +162,8 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
         description: !main
           ? 'The bot posts the panels in your server. Each workspace connects one server.'
           : usesMainServer(ctx.workspace)
-            ? `Choose a server for ${ctx.workspace.name}. Its panels and tools post there, with only its apps; ${main.name}’s server isn’t affected.`
-            : `${ctx.workspace.name} has its own Discord server. Its panels and tools post there, with only its apps; ${main.name}’s server isn’t affected.`,
+            ? `Choose the server where ${ctx.workspace.name}’s panel and tools will run.`
+            : `${ctx.workspace.name} uses its own Discord server.`,
         actions: conn && !changing
           ? menu([{ href: `${b}/setup/discord?change=1`, label: 'Change server', icon: 'arrow-left-right' }, 'sep', leave], { csrf: ctx.csrf, size: 'md' })
           : undefined,
@@ -202,8 +202,9 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
     if (ws.parent_id) {
       if (usesMainServer(ws)) return reply.redirect(`${ctx.base}/setup/discord`);
       const main = (await mainOf(deps.db, ws))!;
+      const old = await getDiscordConnection(deps.db, ws.id);
       await leaveOwnServer(deps, ws.id);
-      setFlash(reply, 'success', `${ws.name} uses ${main.name}’s server again, and its apps are on ${main.name}’s panel${main.my_tickets ? '' : ` once ${main.name}’s panel is published`}. You can remove the bot from its old server in Discord.`);
+      setFlash(reply, 'success', `${ws.name} now uses ${main.name}’s server, and its apps are on ${main.name}’s panel.${main.my_tickets ? '' : ` Publish ${main.name}’s panel to show them.`} You can remove the bot from ${old?.guild_name ?? 'the old server'} in Discord.`);
       return reply.redirect(`${ctx.base}/setup/discord`);
     }
     // Linked workspaces' own panels in this server come down too (not those in servers of their own).
@@ -220,7 +221,7 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
     const ctx = await web.requireWorkspace(req, reply);
     if (!ctx) return reply;
     await createDiscordLink(deps, ctx.workspace.id);
-    setFlash(reply, 'success', 'Link created. Copy it and send it to an admin of the Discord server.');
+    setFlash(reply, 'success', 'Setup link created. Send it to an admin of the server.');
     return reply.redirect(`${ctx.base}/setup/discord#own-server`);
   });
 
@@ -228,12 +229,12 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
     const ctx = await web.requireWorkspace(req, reply);
     if (!ctx) return reply;
     await clearDiscordLink(deps.db, ctx.workspace.id);
-    setFlash(reply, 'success', 'The link stopped working.');
+    setFlash(reply, 'success', 'Setup link revoked.');
     return reply.redirect(`${ctx.base}/setup/discord#own-server`);
   });
 
-  const linkGone = () => simplePage('Connect Discord', html`<h1>This link doesn’t work anymore</h1>
-    <p class="muted">It expired, was already used, or was replaced by a newer one. Ask the workspace’s admins for a new link.</p>`);
+  const linkGone = () => simplePage('Set up Discord', html`<h1>This link is no longer valid</h1>
+    <p class="muted">It has expired, was already used, or was replaced. Ask the workspace’s admins for a new one.</p>`);
 
   app.get('/discord/connect/:token', async (req, reply) => {
     const { token } = req.params as { token: string };
@@ -241,18 +242,18 @@ export function registerDiscordRoutes(app: FastifyInstance, web: Web): void {
     if (!ws || !deps.discord) return reply.type('text/html').send(linkGone());
     const conn = ws.own_discord ? await getDiscordConnection(deps.db, ws.id) : null;
     if (conn) {
-      return reply.type('text/html').send(simplePage('Connect Discord', html`<h1>Already connected</h1>
+      return reply.type('text/html').send(simplePage('Set up Discord', html`<h1>Already set up</h1>
         <p class="muted">${ws.name} is connected to ${conn.guild_name}. There’s nothing more to do.</p>`));
     }
-    return reply.type('text/html').send(simplePage('Connect Discord', html`<div class="stack gap-8">
-      <h1>Add the ticket bot for ${ws.name}</h1>
-      <p class="muted">${ws.name} turns bug reports from Discord into GitHub issues. Adding the bot to your server gives ${ws.name}’s team a ticket panel there that lists only ${ws.name}’s apps.</p>
+    return reply.type('text/html').send(simplePage('Set up Discord', html`<div class="stack gap-8">
+      <h1>Add the ticket bot to your server</h1>
+      <p class="muted">${ws.name}’s team has invited you to add its ticket bot. Members of your server will be able to report problems with ${ws.name}’s apps from a ticket panel.</p>
       <ol class="steps">
-        <li><span>Discord opens. Pick your server (you need Manage Server there) and confirm the bot’s permissions.</span></li>
-        <li><span>That’s all. ${ws.name}’s team picks the channels and sets up the panel.</span></li>
+        <li><span>Choose your server in Discord and approve the bot’s permissions. You need the Manage Server permission.</span></li>
+        <li><span>${ws.name}’s team takes it from there.</span></li>
       </ol>
       <div class="tags">${REQUIRED_CHANNEL_PERMISSIONS.map((p) => tag(p.name))}${tag('Manage Roles')}</div>
-      <p class="small muted">Manage Roles is only used if they turn on contributor roles. You can remove the bot from your server at any time.</p></div>
+      <p class="small muted">Manage Roles is only used for contributor roles. You can remove the bot at any time.</p></div>
       ${linkBtn(`/discord/connect/${token}/add`, 'Add to Discord', { variant: 'primary', block: true, icon: 'bot' })}`));
   });
 

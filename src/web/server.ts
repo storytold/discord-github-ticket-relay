@@ -263,7 +263,7 @@ export async function buildServer(deps: Deps, processor: Processor, opts: { logg
           return null;
         }
         web.render(reply, ctx, 'In the main workspace', '', html`${pageHeader({ title: 'In the main workspace' })}
-          <div class="card">${empty('building-2', 'Set up in the main workspace', `${membership.workspace.name} uses ${main?.workspace.name ?? 'its main workspace'}’s Discord server, so contributor roles, announcements and bot features are set up there. To run them for ${membership.workspace.name} alone, connect a server of its own in Setup › Discord.`, main ? linkBtn(`/w/${main.workspace.id}`, `Go to ${main.workspace.name}`) : null)}</div>`);
+          <div class="card">${empty('building-2', 'Set up in the main workspace', `${membership.workspace.name} uses ${main?.workspace.name ?? 'its main workspace'}’s Discord server, so contributor roles, announcements and bot features are set up there. To use them in a separate server, connect one in Setup › Discord.`, main ? linkBtn(`/w/${main.workspace.id}`, `Go to ${main.workspace.name}`) : null)}</div>`);
         return null;
       }
       return {

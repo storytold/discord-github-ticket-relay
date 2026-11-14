@@ -509,10 +509,10 @@ describe('A linked workspace with its own Discord server', () => {
     expect((await post(`/w/${linked.id}/setup/discord/share`, {}, mod)).statusCode).toBe(403);
 
     const setup = (await page(`/w/${linked.id}/setup/discord`)).body;
-    expect(setup).toContain('Its own Discord server');
+    expect(setup).toContain('<h2>Separate server</h2>');
     await post(`/w/${linked.id}/setup/discord/share`);
     const token = /\/discord\/connect\/([A-Za-z0-9_-]+)/.exec((await page(`/w/${linked.id}/setup/discord`)).body)![1]!;
-    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('Add the ticket bot for Mailcraft');
+    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('Mailcraft’s team has invited you');
     const go = await env.server.inject({ method: 'GET', url: `/discord/connect/${token}/add` });
     expect(go.headers.location).toContain('discord.com');
     const state = new URL(go.headers.location as string).searchParams.get('state')!;
@@ -527,8 +527,8 @@ describe('A linked workspace with its own Discord server', () => {
     expect((await getDiscordConnection(env.db, linked.id))!.guild_id).toBe(SOLID_GUILD);
     expect((await getDiscordConnection(env.db, main.workspace.id))!.guild_id).toBe(main.guildId);
     // The link worked once.
-    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('doesn’t work anymore');
-    expect((await page(`/w/${linked.id}/setup/discord`)).body).toContain('Mailcraft has its own Discord server');
+    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('This link is no longer valid');
+    expect((await page(`/w/${linked.id}/setup/discord`)).body).toContain('Mailcraft uses its own Discord server.');
   });
 
   it('has a panel there with only its apps, and can stay on the main’s panel too', async () => {
@@ -550,7 +550,7 @@ describe('A linked workspace with its own Discord server', () => {
     expect(lastPayload().components[0].components.map((b: any) => b.label)).toEqual([main.workspace.name, 'Mailcraft']);
     // …until it leaves it; its own panel stays.
     const page2 = (await page(`/w/${linked.id}/tickets/panel`)).body;
-    expect(page2).toContain(`Also on ${main.workspace.name}’s panel`);
+    expect(page2).toContain(`Show on ${main.workspace.name}’s panel too`);
     await post(`/w/${linked.id}/tickets/panel`, { also_main_sent: '1' });
     await fresh();
     expect(linked.on_main_panel).toBe(false);

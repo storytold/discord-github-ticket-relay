@@ -225,13 +225,13 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
 
     // A linked workspace: on its main's panel, or a panel of its own (the parts below are for that one).
     const homeChoice = (value: 'main' | 'own', t: string, d: string) => html`<label class="choice"><input type="radio" name="panel_home" value="${value}" id="home-${value}" ${(value === 'main') === onMain ? raw('checked') : ''}><span><span class="t">${t}</span><span class="d">${d}</span></span></label>`;
-    const toSetup = can(m, 'manage') ? html` <a href="${b}/setup/discord#own-server">Connect a server of its own</a> for a panel and tools there.` : '';
+    const toSetup = can(m, 'manage') ? html` <a href="${b}/setup/discord#own-server">Use a separate server</a>` : '';
     const where = main && !sharesServer
       ? html`<div class="section" id="where">
-          <div class="section-h"><div><h3>Where members open tickets</h3><div class="desc">${ws.name} has its own Discord server${conn ? `, ${conn.guild_name}` : ''}. Its panel there lists only its apps.</div></div></div>
+          <div class="section-h"><div><h3>Where members open tickets</h3><div class="desc">${ws.name}’s panel runs in ${conn?.guild_name ?? 'its own server'} and lists only its apps.</div></div></div>
           <input type="hidden" name="also_main_sent" value="1">
-          ${setting(`Also on ${main.name}’s panel`, `Members in ${main.name}’s server find its apps behind the linked workspaces’ button, next to ${main.name}’s own.`,
-            switchInput({ name: 'also_main', id: 'also_main', checked: ws.on_main_panel, label: `Also on ${main.name}’s panel` }), { switchRow: true, flat: true, for: 'also_main' })}
+          ${setting(`Show on ${main.name}’s panel too`, `Members in ${main.name}’s server can also open ${ws.name} tickets, from the linked workspaces’ button.`,
+            switchInput({ name: 'also_main', id: 'also_main', checked: ws.on_main_panel, label: `Show on ${main.name}’s panel too` }), { switchRow: true, flat: true, for: 'also_main' })}
         </div>`
       : main
       ? html`<div class="section" id="where">
@@ -529,7 +529,7 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
       }
       if (alsoMain !== null && main && body.intent !== 'publish') {
         // The main's menu is built when Open a ticket is pressed; a menu in the panel message needs publishing.
-        setFlash(reply, 'success', `${alsoMain ? `${ws.name}’s apps are on ${main.name}’s panel too.` : `${ws.name}’s apps left ${main.name}’s panel; they stay on its own.`} ${main.my_tickets ? 'Members there see it when they press Open a ticket.' : `Publish ${main.name}’s panel to show it there.`}`);
+        setFlash(reply, 'success', `${alsoMain ? `${ws.name}’s apps are now on ${main.name}’s panel too.` : `${ws.name}’s apps were removed from ${main.name}’s panel.`}${main.my_tickets ? '' : ` Publish ${main.name}’s panel to update it.`}`);
       } else if (moved && main) {
         // The main's menu is built when Open a ticket is pressed; a menu in the panel message needs publishing.
         const live = main.my_tickets;

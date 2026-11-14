@@ -112,19 +112,19 @@ export function registerAuthRoutes(app: FastifyInstance, web: Web): void {
     // Through a Discord link: whoever runs the server, without an account here. The one-time state
     // and the link (still unused) are what make it theirs; Discord checked they manage the server.
     if (state.data.link !== undefined) {
-      const page = (title: string, text: string) => reply.type('text/html').send(simplePage('Connect Discord', html`<h1>${title}</h1><p class="muted">${text}</p>`));
+      const page = (title: string, text: string) => reply.type('text/html').send(simplePage('Set up Discord', html`<h1>${title}</h1><p class="muted">${text}</p>`));
       const ws = await getWorkspace(deps.db, wid);
       if (!ws || !(await discordLinkValid(deps.db, wid, state.data.link))) {
-        return page('This link doesn’t work anymore', 'It expired, was already used, or was replaced by a newer one. Ask the workspace’s admins for a new link.');
+        return page('This link is no longer valid', 'It has expired, was already used, or was replaced. Ask the workspace’s admins for a new one.');
       }
-      if (q.error || !q.code) return page('The bot wasn’t added', 'Nothing changed. Open the link again whenever you’re ready.');
+      if (q.error || !q.code) return page('The bot wasn’t added', 'Nothing changed. You can open the link again at any time.');
       try {
         const token = await deps.discord.exchangeCode(q.code, discordRedirect);
         if (!token.guild) throw new UserFacingError('Discord didn’t say which server the bot was added to. Open the link again and try once more.');
         await connectDiscordServer(deps, wid, token.guild, null);
         await clearDiscordLink(deps.db, wid);
         deps.log.info({ workspace: wid, guild: token.guild.id }, 'discord server connected through a link');
-        return page(`Added to ${token.guild.name}`, `${ws.name}’s team can now set up its ticket panel and its other tools there. You can close this page.`);
+        return page(`Added to ${token.guild.name}`, `You’re all set. ${ws.name}’s team will finish the setup. You can close this page.`);
       } catch (err) {
         deps.log.warn({ err: (err as Error).message }, 'discord link callback failed');
         return page('The server wasn’t connected', err instanceof UserFacingError ? err.message : 'Something went wrong. Open the link again and try once more.');
