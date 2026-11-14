@@ -56,6 +56,12 @@ export interface WorkspaceRow {
   github_link_hash: string | null;
   github_link_enc: string | null;
   github_link_expires_at: Date | null;
+  /** It has a Discord connection of its own: every connected main, and a linked workspace with its own server. */
+  own_discord: boolean;
+  /** A one-time link to add the bot to its own Discord server (see discord-link.ts). */
+  discord_link_hash: string | null;
+  discord_link_enc: string | null;
+  discord_link_expires_at: Date | null;
   created_at: Date;
 }
 

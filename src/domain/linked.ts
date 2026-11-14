@@ -24,6 +24,14 @@ export async function mainOf(q: Queryable, ws: WorkspaceRow): Promise<WorkspaceR
   return ws.parent_id ? getWorkspace(q, ws.parent_id) : null;
 }
 
+/**
+ * A linked workspace that uses its main's Discord server (it hasn't connected its own): its panel is
+ * on the main's or in the main's server, and the tools that post in a server stay with the main.
+ */
+export function usesMainServer(ws: Pick<WorkspaceRow, 'parent_id' | 'own_discord'>): boolean {
+  return Boolean(ws.parent_id) && !ws.own_discord;
+}
+
 /** A main's linked workspaces, oldest first. */
 export async function listLinked(q: Queryable, mainId: string): Promise<WorkspaceRow[]> {
   const { rows } = await q.query<WorkspaceRow>('SELECT * FROM workspaces WHERE parent_id = $1 ORDER BY created_at, name', [mainId]);
@@ -114,7 +122,7 @@ export function withScope<T>(payload: T, scopeId: string | null): T {
 
 /** The workspace whose panel a click came from: the main, or a linked workspace's own panel (by its tag). */
 export async function panelScope(q: Queryable, main: WorkspaceRow, scopeId: string | null): Promise<WorkspaceRow | null> {
-  if (!scopeId) return main;
+  if (!scopeId || scopeId === main.id) return main;
   const ws = await getWorkspace(q, scopeId);
   return ws && ws.parent_id === main.id ? ws : null;
 }
@@ -128,6 +136,6 @@ export function isMainOnlyPath(path: string): boolean {
 }
 
 /** The workspace whose panel shows this workspace's apps: its main's, for a linked workspace on it. */
-export function panelOwnerId(ws: Pick<WorkspaceRow, 'id' | 'parent_id' | 'on_main_panel'>): string {
-  return ws.parent_id && ws.on_main_panel ? ws.parent_id : ws.id;
+export function panelOwnerId(ws: Pick<WorkspaceRow, 'id' | 'parent_id' | 'on_main_panel' | 'own_discord'>): string {
+  return usesMainServer(ws) && ws.on_main_panel ? ws.parent_id! : ws.id;
 }

@@ -4,7 +4,8 @@ import { DiscordApiError } from '../../discord/client.js';
 import { BOT_INSTALL_PERMISSIONS } from '../../discord/permissions.js';
 import { can } from '../../domain/permissions.js';
 import { consumeState, createState } from '../../domain/oauth-state.js';
-import { saveDiscordGuild } from '../../domain/store.js';
+import { clearDiscordLink, connectDiscordServer, discordLinkValid } from '../../domain/discord-link.js';
+import { getWorkspace } from '../../domain/workspaces.js';
 import { UserFacingError } from '../../domain/types.js';
 import {
   acceptInvite,
@@ -107,6 +108,29 @@ export function registerAuthRoutes(app: FastifyInstance, web: Web): void {
 
     // Bot installation: bind the server to the workspace that started the flow.
     const wid = state.workspace_id!;
+
+    // Through a Discord link: whoever runs the server, without an account here. The one-time state
+    // and the link (still unused) are what make it theirs; Discord checked they manage the server.
+    if (state.data.link !== undefined) {
+      const page = (title: string, text: string) => reply.type('text/html').send(simplePage('Connect Discord', html`<h1>${title}</h1><p class="muted">${text}</p>`));
+      const ws = await getWorkspace(deps.db, wid);
+      if (!ws || !(await discordLinkValid(deps.db, wid, state.data.link))) {
+        return page('This link doesn’t work anymore', 'It expired, was already used, or was replaced by a newer one. Ask the workspace’s admins for a new link.');
+      }
+      if (q.error || !q.code) return page('The bot wasn’t added', 'Nothing changed. Open the link again whenever you’re ready.');
+      try {
+        const token = await deps.discord.exchangeCode(q.code, discordRedirect);
+        if (!token.guild) throw new UserFacingError('Discord didn’t say which server the bot was added to. Open the link again and try once more.');
+        await connectDiscordServer(deps, wid, token.guild, null);
+        await clearDiscordLink(deps.db, wid);
+        deps.log.info({ workspace: wid, guild: token.guild.id }, 'discord server connected through a link');
+        return page(`Added to ${token.guild.name}`, `${ws.name}’s team can now set up its ticket panel and its other tools there. You can close this page.`);
+      } catch (err) {
+        deps.log.warn({ err: (err as Error).message }, 'discord link callback failed');
+        return page('The server wasn’t connected', err instanceof UserFacingError ? err.message : 'Something went wrong. Open the link again and try once more.');
+      }
+    }
+
     const back = `/w/${wid}/setup/discord`;
     const botMember = req.auth ? await getMembership(deps.db, req.auth.user.id, wid) : null;
     if (!req.auth || req.auth.session.id !== state.session_id || !botMember || !can(botMember, 'manage')) {
@@ -120,7 +144,7 @@ export function registerAuthRoutes(app: FastifyInstance, web: Web): void {
       // The guild comes from Discord's token response, not the (spoofable) redirect parameters.
       const token = await deps.discord.exchangeCode(q.code, discordRedirect);
       if (!token.guild) throw new UserFacingError('Discord did not report which server the bot was added to. Please try again.');
-      await saveDiscordGuild(deps.db, wid, token.guild, req.auth.user.id);
+      await connectDiscordServer(deps, wid, token.guild, req.auth.user.id);
       setFlash(reply, 'success', `The bot was added to “${token.guild.name}”. Choose the tickets channel in Discord tickets › Panel.`);
     } catch (err) {
       setFlash(reply, 'error', err instanceof UserFacingError ? err.message : 'Could not complete the bot installation. Please try again.');
@@ -214,8 +238,7 @@ export function registerAuthRoutes(app: FastifyInstance, web: Web): void {
   app.post('/w/:wid/setup/discord/install', async (req, reply) => {
     const ctx = await web.requireWorkspace(req, reply);
     if (!ctx) return reply;
-    // A linked workspace uses its main's server.
-    if (!deps.discord || ctx.workspace.parent_id) return reply.redirect(`${ctx.base}/setup/discord`);
+    if (!deps.discord) return reply.redirect(`${ctx.base}/setup/discord`);
     const guildId = (req.body as { guild_id?: string }).guild_id;
     const state = await createState(deps.db, 'discord_bot', req.auth!.session.id, ctx.workspace.id);
     return reply.redirect(deps.discord.botInstallUrl(state, discordRedirect, BOT_INSTALL_PERMISSIONS, guildId && /^\d{5,25}$/.test(guildId) ? guildId : undefined));

@@ -254,6 +254,22 @@ Discord endpoint, OAuth), one or more queue workers, and an optional triage work
   own workspace, with that workspace's GitHub installation, ticket types, notice and limits. My
   tickets lists the tickets of every workspace on that panel (`panelTickets()`); each ticket's
   actions follow its own workspace's switches.
+- **A linked workspace's own Discord server:** it can connect a server of its own (Setup ›
+  Discord: a server its admin manages, or a one-time link, below). `workspaces.own_discord` marks a
+  workspace with its own `discord_connections` row (`usesMainServer()` is false), so
+  `getDiscordConnection()` returns that row instead of the main's. Clicks from that server arrive
+  for the linked workspace itself: its panel lists only its apps (`serverApp()` looks among its own
+  apps), My tickets shows only its tickets, and its custom_ids carry no scope tag. Contributor
+  roles, announcements and bot features open up for it (`isMainOnlyPath()` applies only while it
+  uses its main's server) and, like every tool, read and post only its own data in its own server.
+  `on_main_panel` then means its apps are on the main's panel too. Going back to the main's server
+  (`leaveOwnServer()`) takes down its ticket panel, contributor roles panel, known-issues board and
+  update-pings message there, keeps their settings, and puts its apps on the main's panel.
+- **Discord links** (`src/domain/discord-link.ts`): like install links, for whoever runs a
+  linked workspace's server. An owner or admin makes one (7 days, one at a time, hashed, kept
+  encrypted). `/discord/connect/:token` sends them to Discord to add the bot with a one-time state;
+  the callback takes the server from Discord's token response and connects it without a session,
+  then clears the link. Needs **Public Bot** on in the Discord application.
 - **Install links** (`src/domain/github-link.ts`): an admin makes a one-time link (7 days, hashed
   for lookup, kept encrypted so it can be copied again) for someone who owns the organization.
   `/github/connect/:token` sends them to GitHub to install (or sign in); the callback checks

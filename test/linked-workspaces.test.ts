@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { connectDiscordServer } from '../src/domain/discord-link.js';
 import { createLinkedWorkspace, listLinked } from '../src/domain/linked.js';
 import { checkPanel, publishPanel } from '../src/domain/panel.js';
 import { createApp, getDiscordConnection, getGitHubConnection, getPanel, saveGitHubConnection } from '../src/domain/store.js';
@@ -487,5 +488,112 @@ describe('Deleting a workspace', () => {
     }
     // The owner has no workspaces left.
     expect((await env.server.inject({ method: 'GET', url: '/', ...get(main.owner) })).headers.location).toBe('/workspaces');
+  });
+});
+
+describe('A linked workspace with its own Discord server', () => {
+  const SOLID_GUILD = '610000000000000001';
+  const SOLID_CHANNEL = '610000000000000002';
+  const page = (url: string, who: Admin = main.owner) => env.server.inject({ method: 'GET', url, ...get(who) });
+  const post = (url: string, fields: Record<string, string> = {}, who: Admin = main.owner) => env.server.inject({ method: 'POST', url, ...form(who, fields) });
+  const addSolid = () => env.discord.addGuild(SOLID_GUILD, 'Solid', [{ id: SOLID_CHANNEL, type: 0, name: 'help', position: 0 }]);
+  const connectSolid = async () => {
+    addSolid();
+    await connectDiscordServer(env.deps, linked.id, { id: SOLID_GUILD, name: 'Solid', icon: null }, null);
+    await fresh();
+  };
+  const lastPayload = () => [...env.discord.messages.values()].at(-1)!.payload as any;
+
+  it('connects through a one-time link that only its owner and admins can make', async () => {
+    const mod = await join('moderator', { workspace: linked.id });
+    expect((await post(`/w/${linked.id}/setup/discord/share`, {}, mod)).statusCode).toBe(403);
+
+    const setup = (await page(`/w/${linked.id}/setup/discord`)).body;
+    expect(setup).toContain('Its own Discord server');
+    await post(`/w/${linked.id}/setup/discord/share`);
+    const token = /\/discord\/connect\/([A-Za-z0-9_-]+)/.exec((await page(`/w/${linked.id}/setup/discord`)).body)![1]!;
+    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('Add the ticket bot for Mailcraft');
+    const go = await env.server.inject({ method: 'GET', url: `/discord/connect/${token}/add` });
+    expect(go.headers.location).toContain('discord.com');
+    const state = new URL(go.headers.location as string).searchParams.get('state')!;
+
+    // Whoever runs the server comes back from Discord without an account here.
+    addSolid();
+    env.discord.codes.set('solid-code', { access_token: 'x', expires_in: 600, scope: 'bot identify', guild: { id: SOLID_GUILD, name: 'Solid', icon: null } });
+    const done = await env.server.inject({ method: 'GET', url: `/oauth/discord/callback?code=solid-code&state=${state}` });
+    expect(done.body).toContain('Added to Solid');
+    await fresh();
+    expect(linked.own_discord).toBe(true);
+    expect((await getDiscordConnection(env.db, linked.id))!.guild_id).toBe(SOLID_GUILD);
+    expect((await getDiscordConnection(env.db, main.workspace.id))!.guild_id).toBe(main.guildId);
+    // The link worked once.
+    expect((await env.server.inject({ method: 'GET', url: `/discord/connect/${token}` })).body).toContain('doesn’t work anymore');
+    expect((await page(`/w/${linked.id}/setup/discord`)).body).toContain('Mailcraft has its own Discord server');
+  });
+
+  it('has a panel there with only its apps, and can stay on the main’s panel too', async () => {
+    await connectSolid();
+    const res = await post(`/w/${linked.id}/tickets/panel`, { channel_id: SOLID_CHANNEL, intent: 'publish' });
+    expect(res.statusCode).toBe(302);
+    const own = (await getPanel(env.db, linked.id))!;
+    expect(own.channel_id).toBe(SOLID_CHANNEL);
+    const select = lastPayload().components[0].components[0];
+    expect(select.custom_id).toBe('tr:pick');
+    expect(select.options.map((o: any) => o.label)).toEqual(['Mailcraft']);
+
+    // From its server, the main's apps can't be reached.
+    expect((await click('tr:pick', { values: [main.apps[0]!.public_id], guild: SOLID_GUILD })).json().data.embeds[0].title).toBe('App unavailable');
+    expect((await click('tr:pick', { values: [mailcraft.public_id], guild: SOLID_GUILD })).json().type).toBe(9);
+
+    // Still on the main's panel, behind the linked workspaces' button…
+    await publishPanel(env.deps, main.workspace.id, null);
+    expect(lastPayload().components[0].components.map((b: any) => b.label)).toEqual([main.workspace.name, 'Mailcraft']);
+    // …until it leaves it; its own panel stays.
+    const page2 = (await page(`/w/${linked.id}/tickets/panel`)).body;
+    expect(page2).toContain(`Also on ${main.workspace.name}’s panel`);
+    await post(`/w/${linked.id}/tickets/panel`, { also_main_sent: '1' });
+    await fresh();
+    expect(linked.on_main_panel).toBe(false);
+    expect(await getPanel(env.db, linked.id)).not.toBeNull();
+    await publishPanel(env.deps, main.workspace.id, null);
+    expect(lastPayload().components[0].components[0].options.map((o: any) => o.label)).toEqual(['PhotoCraft']);
+  });
+
+  it('shows only its tickets in My tickets there', async () => {
+    await connectSolid();
+    await setMyTickets(env.db, linked.id, true);
+    await sendInteraction(env, { ...modalSubmit(main, main.apps[0]!, { title: 'Export crashes', description: 'Every time I export.' }), member: member(ALEX, 'Alex') });
+    await sendInteraction(env, { ...modalSubmit(main, mailcraft, { title: 'Templates vanish', description: 'They disappear after saving.' }), guild_id: SOLID_GUILD, member: member(ALEX, 'Alex') });
+    await env.worker.drain();
+    const list = (await click('tr:mine', { guild: SOLID_GUILD })).json().data;
+    const options = list.components.find((r: any) => r.components[0].type === 3).components[0].options;
+    expect(options.map((o: { label: string }) => o.label)).toEqual(['Templates vanish']);
+    expect(JSON.stringify(list)).not.toContain('~');
+  });
+
+  it('runs its own contributor roles, announcements and bot features, and can go back to the main’s server', async () => {
+    expect((await page(`/w/${linked.id}/contributors`)).body).toContain('Set up in the main workspace');
+    await connectSolid();
+    const tools = await page(`/w/${linked.id}/contributors`);
+    expect(tools.statusCode).toBe(200);
+    expect(tools.body).not.toContain('Set up in the main workspace');
+    expect(tools.body).toContain(`href="/w/${linked.id}/announcements"`);
+
+    // The main disconnecting its server leaves this one alone.
+    await post(`/w/${linked.id}/tickets/panel`, { channel_id: SOLID_CHANNEL, intent: 'publish' });
+    const own = (await getPanel(env.db, linked.id))!;
+    await post(`/w/${main.workspace.id}/setup/discord/disconnect`);
+    expect((await getDiscordConnection(env.db, linked.id))!.guild_id).toBe(SOLID_GUILD);
+    expect(env.discord.messages.has(own.message_id)).toBe(true);
+
+    // Back to the main's server: its panel there comes down and its apps go on the main's panel.
+    await env.db.query('UPDATE workspaces SET on_main_panel = 0 WHERE id = $1', [linked.id]);
+    const back = await post(`/w/${linked.id}/setup/discord/disconnect`);
+    expect(back.headers.location).toBe(`/w/${linked.id}/setup/discord`);
+    await fresh();
+    expect([linked.own_discord, linked.on_main_panel]).toEqual([false, true]);
+    expect(env.discord.messages.has(own.message_id)).toBe(false);
+    expect(await getPanel(env.db, linked.id)).toBeNull();
+    expect((await page(`/w/${linked.id}/contributors`)).body).toContain('Set up in the main workspace');
   });
 });

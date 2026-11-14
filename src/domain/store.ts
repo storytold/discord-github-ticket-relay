@@ -64,15 +64,17 @@ export async function deleteGitHubConnection(q: Queryable, workspaceId: string):
 // ---- Discord connection -------------------------------------------------------------------
 
 /**
- * The workspace's Discord server. A linked workspace uses its main's server: it gets the main's
- * connection, with its own ID and its own panel channel as the tickets channel.
+ * The workspace's Discord server. A linked workspace uses its main's server unless it connected one
+ * of its own: then it gets the main's connection, with its own ID and its own panel channel as the
+ * tickets channel.
  */
 export async function getDiscordConnection(q: Queryable, workspaceId: string): Promise<DiscordConnectionRow | null> {
   const { rows } = await q.query<DiscordConnectionRow>(
     `SELECT d.*, w.id AS workspace_id,
-       CASE WHEN w.parent_id IS NULL THEN d.tickets_channel_id ELSE w.panel_channel_id END AS tickets_channel_id,
-       CASE WHEN w.parent_id IS NULL THEN d.tickets_channel_name ELSE w.panel_channel_name END AS tickets_channel_name
-     FROM workspaces w JOIN discord_connections d ON d.workspace_id = coalesce(w.parent_id, w.id) WHERE w.id = $1`,
+       CASE WHEN d.workspace_id = w.id THEN d.tickets_channel_id ELSE w.panel_channel_id END AS tickets_channel_id,
+       CASE WHEN d.workspace_id = w.id THEN d.tickets_channel_name ELSE w.panel_channel_name END AS tickets_channel_name
+     FROM workspaces w JOIN discord_connections d ON d.workspace_id = CASE WHEN w.own_discord = 1 THEN w.id ELSE coalesce(w.parent_id, w.id) END
+     WHERE w.id = $1`,
     [workspaceId],
   );
   return rows[0] ?? null;
@@ -91,14 +93,15 @@ export async function saveDiscordGuild(
   q: Queryable,
   workspaceId: string,
   guild: { id: string; name: string; icon: string | null },
-  userId: string,
+  userId: string | null,
 ): Promise<void> {
   const owner = await getDiscordConnectionByGuild(q, guild.id);
   if (owner && owner.workspace_id !== workspaceId) {
     throw new UserFacingError('That Discord server is already connected to another workspace. Disconnect it there first.', 409);
   }
-  const current = await getDiscordConnection(q, workspaceId);
-  const sameGuild = current?.guild_id === guild.id;
+  // Its own row only: a linked workspace that used its main's server starts fresh in its own.
+  const { rows: own } = await q.query<{ guild_id: string }>('SELECT guild_id FROM discord_connections WHERE workspace_id = $1', [workspaceId]);
+  const sameGuild = own[0]?.guild_id === guild.id;
   try {
     await q.query(
       `INSERT INTO discord_connections (workspace_id, guild_id, guild_name, guild_icon, connected_by)
@@ -110,8 +113,9 @@ export async function saveDiscordGuild(
          connected_by = EXCLUDED.connected_by, connected_at = now_ms(), updated_at = now_ms()`,
       [workspaceId, guild.id, guild.name, guild.icon, userId, sameGuild],
     );
-    // Linked workspaces follow to the new server: their own panels' channels were in the old one.
-    if (!sameGuild) await q.query('UPDATE workspaces SET panel_channel_id = NULL, panel_channel_name = NULL WHERE parent_id = $1', [workspaceId]);
+    await q.query('UPDATE workspaces SET own_discord = 1, updated_at = now_ms() WHERE id = $1', [workspaceId]);
+    // Linked workspaces using this server follow to the new one: their own panels' channels were in the old one.
+    if (!sameGuild) await q.query('UPDATE workspaces SET panel_channel_id = NULL, panel_channel_name = NULL WHERE parent_id = $1 AND own_discord = 0', [workspaceId]);
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new UserFacingError('That Discord server is already connected to another workspace. Disconnect it there first.', 409);
@@ -129,9 +133,9 @@ export async function setTicketsChannel(q: Queryable, workspaceId: string, chann
   );
 }
 
-/** The server's status, found from any workspace using it (a linked workspace's is its main's). */
+/** The server's status, found from any workspace using it (a linked workspace's is its main's, unless it has its own). */
 export async function setDiscordStatus(q: Queryable, workspaceId: string, status: DiscordConnectionRow['status'], detail: string | null) {
-  await q.query('UPDATE discord_connections SET status = $2, status_detail = $3, updated_at = now_ms() WHERE workspace_id = (SELECT coalesce(parent_id, id) FROM workspaces WHERE id = $1)', [
+  await q.query('UPDATE discord_connections SET status = $2, status_detail = $3, updated_at = now_ms() WHERE workspace_id = (SELECT CASE WHEN own_discord = 1 THEN id ELSE coalesce(parent_id, id) END FROM workspaces WHERE id = $1)', [
     workspaceId,
     status,
     detail,
@@ -140,6 +144,7 @@ export async function setDiscordStatus(q: Queryable, workspaceId: string, status
 
 export async function deleteDiscordConnection(q: Queryable, workspaceId: string): Promise<void> {
   await q.query('DELETE FROM discord_connections WHERE workspace_id = $1', [workspaceId]);
+  await q.query('UPDATE workspaces SET own_discord = 0, updated_at = now_ms() WHERE id = $1', [workspaceId]);
 }
 
 // ---- Apps ---------------------------------------------------------------------------------

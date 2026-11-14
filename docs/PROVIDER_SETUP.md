@@ -34,8 +34,9 @@ Throughout, `https://relay.example.com` stands for your `PUBLIC_URL`.
    - **Reset Token** and copy it → `DISCORD_BOT_TOKEN`.
    - No privileged gateway intents are needed, so leave them all off.
    - **Public Bot**: leave it on only if admins of other workspaces on this deployment should
-     be able to add the bot. With it off, only you (the application owner) can add it to
-     servers.
+     be able to add the bot, or if you send a Discord link (Setup › Discord on a linked
+     workspace) to someone who runs another server. With it off, only you (the application
+     owner) can add it to servers. The bot does nothing in a server no workspace connected.
    - Leave "Requires OAuth2 Code Grant" off. The app requests `bot identify`, which already
      goes through the code grant.
 5. **Installation** → install link: choose **None**. The admin UI generates the correct link,

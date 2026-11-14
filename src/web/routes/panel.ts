@@ -4,7 +4,7 @@ import { DEFAULT_MEMBER_TEXT, MAX_NEW_FILES, MEMBER_CLOSE, MEMBER_LIMITS, MEMBER
 import { myTicketDetail, myTicketsPage, statusWords, type MemberTicket } from '../../domain/my-tickets.js';
 import { formFor } from '../../domain/forms.js';
 import { inspectGuild } from '../../domain/discord-checks.js';
-import { listLinked, mainOf, setOnMainPanel, setPanelGroups } from '../../domain/linked.js';
+import { listLinked, mainOf, setOnMainPanel, setPanelGroups, usesMainServer } from '../../domain/linked.js';
 import { checkPanel, linkedGroupTitle, mainGroupTitle, panelContent, panelGroupsOf, panelPayloadFor, publishPanel, unpublishPanel } from '../../domain/panel.js';
 import { can, type MemberAccess } from '../../domain/permissions.js';
 import { getApp, getDiscordConnection, getGitHubConnection, getPanel, listApps, setTicketsChannel } from '../../domain/store.js';
@@ -120,10 +120,12 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
     ]);
     const state = await checkPanel(deps, wid, { live: false });
     const guild = deps.discord && conn && conn.status === 'active' ? await inspectGuild(deps.discord, conn.guild_id) : null;
-    // A linked workspace's apps are on its main's panel, or on one of its own. A main's panel also
-    // lists the apps of its linked workspaces that are on it.
+    // A linked workspace's apps are on its main's panel, or on one of its own: in its main's server, or
+    // in a server of its own (and maybe on its main's panel too). A main's panel also lists the apps of
+    // its linked workspaces that are on it.
     const main = await mainOf(deps.db, ws);
-    const onMain = Boolean(main && ws.on_main_panel);
+    const sharesServer = Boolean(main && usesMainServer(ws));
+    const onMain = Boolean(sharesServer && ws.on_main_panel);
     const panelWs = onMain ? main! : ws;
     const [content, mainState, mainPanel, mainConn, others] = await Promise.all([
       panelContent(deps, panelWs),
@@ -223,9 +225,17 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
 
     // A linked workspace: on its main's panel, or a panel of its own (the parts below are for that one).
     const homeChoice = (value: 'main' | 'own', t: string, d: string) => html`<label class="choice"><input type="radio" name="panel_home" value="${value}" id="home-${value}" ${(value === 'main') === onMain ? raw('checked') : ''}><span><span class="t">${t}</span><span class="d">${d}</span></span></label>`;
-    const where = main
+    const toSetup = can(m, 'manage') ? html` <a href="${b}/setup/discord#own-server">Connect a server of its own</a> for a panel and tools there.` : '';
+    const where = main && !sharesServer
       ? html`<div class="section" id="where">
-          <div class="section-h"><div><h3>Where members open tickets</h3><div class="desc">${ws.name} uses ${main.name}’s Discord server.</div></div></div>
+          <div class="section-h"><div><h3>Where members open tickets</h3><div class="desc">${ws.name} has its own Discord server${conn ? `, ${conn.guild_name}` : ''}. Its panel there lists only its apps.</div></div></div>
+          <input type="hidden" name="also_main_sent" value="1">
+          ${setting(`Also on ${main.name}’s panel`, `Members in ${main.name}’s server find its apps behind the linked workspaces’ button, next to ${main.name}’s own.`,
+            switchInput({ name: 'also_main', id: 'also_main', checked: ws.on_main_panel, label: `Also on ${main.name}’s panel` }), { switchRow: true, flat: true, for: 'also_main' })}
+        </div>`
+      : main
+      ? html`<div class="section" id="where">
+          <div class="section-h"><div><h3>Where members open tickets</h3><div class="desc">${ws.name} uses ${main.name}’s Discord server.${toSetup}</div></div></div>
           <input type="hidden" name="panel_home_sent" value="1">
           <div class="choices" role="radiogroup" aria-label="Where members open tickets">
             ${homeChoice('main', `On ${main.name}’s panel`, `Members find its apps behind the linked workspaces’ button there, next to ${main.name}’s own. The panel’s channel, text, buttons and My tickets switch are set on ${main.name}’s Panel page.`)}
@@ -259,7 +269,7 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
           </div>
         </div>`
       : '';
-    const ownOnly = (inner: SafeHtml) => (main ? html`<div data-follows="home-own" ${onMain ? raw('hidden') : ''}>${inner}</div>` : inner);
+    const ownOnly = (inner: SafeHtml) => (sharesServer ? html`<div data-follows="home-own" ${onMain ? raw('hidden') : ''}>${inner}</div>` : inner);
 
     const sections = html`
           ${where}
@@ -280,9 +290,9 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
             ${ownOnly(setting('My tickets', html`The panel shows two buttons instead of the app menu: <strong>Open a ticket</strong>, and <strong>My tickets</strong>, where members see the tickets they’ve sent here and what’s happening with each. Each member sees only their own. Publish the panel to show the change.`,
               html`<input type="hidden" name="my_tickets_sent" value="1">${switchInput({ name: 'my_tickets', id: 'my_tickets', checked: ws.my_tickets, label: 'My tickets', attrs: raw('data-layout-switch') })}`,
               { switchRow: true, flat: true, for: 'my_tickets' }))}
-            <div class="member-actions" ${main ? '' : html`data-follows="my_tickets" ${ws.my_tickets ? '' : raw('hidden')}`}>
+            <div class="member-actions" ${sharesServer ? '' : html`data-follows="my_tickets" ${ws.my_tickets ? '' : raw('hidden')}`}>
               <input type="hidden" name="member_actions_sent" value="1">
-              <div class="section-h"><div><h4>On each open ticket</h4><div class="desc">${main
+              <div class="section-h"><div><h4>On each open ticket</h4><div class="desc">${sharesServer
                 ? `Buttons members can use on one of their ${ws.name} tickets while it’s open on GitHub, from My tickets on the panel it’s on. Changes show right away.`
                 : 'Buttons members can use on one of their tickets while it’s open on GitHub. Changes show right away, without publishing the panel.'}</div></div>
                 ${edit ? html`<button type="button" class="btn ghost sm" data-reset-fields="${MEMBER_TEXT_KEYS.map((k) => `member_text_${k}`).join(' ')}"><span class="lead">${icon('undo-2', 14)}</span><span class="lbl">Reset comments</span></button>` : ''}</div>
@@ -430,11 +440,17 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
             text: Object.fromEntries(MEMBER_TEXT_KEYS.map((k) => [k, body[`member_text_${k}`]]).filter(([, v]) => v !== undefined)),
           }, current)
         : null;
-      // A linked workspace: on its main's panel, or a panel of its own.
+      // A linked workspace in its main's server: on its main's panel, or a panel of its own there.
       const main = await mainOf(deps.db, ws);
       let moved: 'main' | 'own' | null = null;
       let removedOwn = false;
-      if (main && body.panel_home_sent !== undefined && (body.panel_home === 'main' || body.panel_home === 'own') && (body.panel_home === 'main') !== ws.on_main_panel) {
+      // With a server of its own: its panel is there either way, and its apps can be on the main's panel too.
+      let alsoMain: boolean | null = null;
+      if (main && !usesMainServer(ws) && body.also_main_sent !== undefined && (body.also_main === '1') !== ws.on_main_panel) {
+        alsoMain = body.also_main === '1';
+        await setOnMainPanel(deps.db, wid, alsoMain);
+      }
+      if (main && usesMainServer(ws) && body.panel_home_sent !== undefined && (body.panel_home === 'main' || body.panel_home === 'own') && (body.panel_home === 'main') !== ws.on_main_panel) {
         moved = body.panel_home;
         await setOnMainPanel(deps.db, wid, moved === 'main');
         // Its own panel comes down: its apps are on the main's now.
@@ -511,7 +527,10 @@ export function registerPanelRoutes(app: FastifyInstance, web: Web): void {
           await setTicketsChannel(deps.db, wid, channel);
         }
       }
-      if (moved && main) {
+      if (alsoMain !== null && main && body.intent !== 'publish') {
+        // The main's menu is built when Open a ticket is pressed; a menu in the panel message needs publishing.
+        setFlash(reply, 'success', `${alsoMain ? `${ws.name}’s apps are on ${main.name}’s panel too.` : `${ws.name}’s apps left ${main.name}’s panel; they stay on its own.`} ${main.my_tickets ? 'Members there see it when they press Open a ticket.' : `Publish ${main.name}’s panel to show it there.`}`);
+      } else if (moved && main) {
         // The main's menu is built when Open a ticket is pressed; a menu in the panel message needs publishing.
         const live = main.my_tickets;
         setFlash(reply, 'success', moved === 'main'

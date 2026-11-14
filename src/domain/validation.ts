@@ -4,6 +4,7 @@ import { checkPanel } from './panel.js';
 import { getDiscordConnection, getGitHubConnection, listApps, refreshAppRepo, setDiscordStatus, setGitHubStatus } from './store.js';
 import type { Deps } from './types.js';
 import { getWorkspace } from './workspaces.js';
+import { usesMainServer } from './linked.js';
 
 export interface Check {
   area: 'deployment' | 'github' | 'discord' | 'apps' | 'panel';
@@ -57,8 +58,8 @@ export async function validateWorkspace(deps: Deps, workspaceId: string, base: s
   // ---- Discord (a linked workspace's is its main's server)
   const dc = await getDiscordConnection(deps.db, workspaceId);
   const ws = await getWorkspace(deps.db, workspaceId);
-  // A linked workspace's apps on its main's panel: no channel or panel of its own to check.
-  const onMain = Boolean(ws?.parent_id && ws.on_main_panel);
+  // A linked workspace's apps on its main's panel (in its main's server): no channel or panel of its own to check.
+  const onMain = Boolean(ws && usesMainServer(ws) && ws.on_main_panel);
   let discordOk = false;
   if (!dc) {
     add({ area: 'discord', status: 'error', title: ws?.parent_id ? 'The main workspace hasn’t connected a Discord server' : 'No Discord server connected', fix: { label: ws?.parent_id ? 'Discord' : 'Connect Discord', href: `${base}/setup/discord` } });

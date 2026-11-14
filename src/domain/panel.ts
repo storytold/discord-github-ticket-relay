@@ -2,7 +2,7 @@ import { DiscordApiError, DiscordErrorCode } from '../discord/client.js';
 import { buildPanelMessage, type PanelApp, type PanelGroup } from '../discord/messages.js';
 import type { Queryable } from '../db/database.js';
 import { sha256 } from '../lib/crypto.js';
-import { panelApps, panelWorkspaces, withScope } from './linked.js';
+import { panelApps, panelWorkspaces, usesMainServer, withScope } from './linked.js';
 import { deletePanel, getDiscordConnection, getPanel, markPanel, savePanel } from './store.js';
 import { UserFacingError, type AppRow, type Deps, type WorkspaceRow } from './types.js';
 import { enabledTicketTypes } from './ticket-types.js';
@@ -61,7 +61,7 @@ export function panelPayloadFor(workspace: WorkspaceRow, apps: AppRow[], hasType
     intro: workspace.panel_intro,
     apps: apps.filter((a) => a.enabled).map(panelApp),
     groups: panelGroupsOf(family, apps),
-  }), workspace.parent_id ? workspace.id : null);
+  }), usesMainServer(workspace) ? workspace.id : null);
   return { payload, hash: sha256(JSON.stringify(payload)) };
 }
 
@@ -129,7 +129,7 @@ export async function publishPanel(deps: Deps, workspaceId: string, userId: stri
   const conn = await getDiscordConnection(deps.db, workspaceId);
   if (!conn?.tickets_channel_id) throw new UserFacingError('Choose a tickets channel first.');
   const workspace = (await getWorkspace(deps.db, workspaceId))!;
-  if (workspace.parent_id && workspace.on_main_panel) throw new UserFacingError('This workspace’s apps are on its main workspace’s panel. Choose “Its own panel” first.');
+  if (usesMainServer(workspace) && workspace.on_main_panel) throw new UserFacingError('This workspace’s apps are on its main workspace’s panel. Choose “Its own panel” first.');
   const { apps, hasTypes, family } = await panelContent(deps, workspace);
   if (!apps.some((a) => a.enabled)) throw new UserFacingError('Add at least one enabled app before publishing the panel.');
   const { payload, hash } = panelPayloadFor(workspace, apps, hasTypes, family);

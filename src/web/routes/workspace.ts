@@ -7,7 +7,7 @@ import { AREAS, areasOf, can, levelOf, TOOL_NAMES, TOOLS, toolAccess, type Area,
 import { getDiscordConnection, getGitHubConnection, listApps } from '../../domain/store.js';
 import { countByStatus, decryptPayload, filedThisWeek } from '../../domain/submissions.js';
 import { UserFacingError, type AppRow, type DiscordConnectionRow, type SubmissionStatus } from '../../domain/types.js';
-import { createLinkedWorkspace, listLinked, mainOf, MAIN_ONLY_TOOLS, panelOwnerId } from '../../domain/linked.js';
+import { createLinkedWorkspace, listLinked, mainOf, MAIN_ONLY_TOOLS, panelOwnerId, usesMainServer } from '../../domain/linked.js';
 import { deleteWorkspace } from '../../domain/delete-workspace.js';
 import { getWorkspace, updateWorkspaceGeneral, userNames } from '../../domain/workspaces.js';
 import { html, raw, type SafeHtml } from '../../lib/html.js';
@@ -585,7 +585,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
     const shared: Shared = { web, ctx, dc, apps, repos, counts };
     // One card per tool this person can open a page of.
     // A linked workspace has no contributor roles, announcements or bot features (its main does).
-    const tools = OVERVIEW_TOOLS.filter((t) => firstPage(m, t) !== null && !(ctx.workspace.parent_id && (MAIN_ONLY_TOOLS as readonly string[]).includes(t)));
+    const tools = OVERVIEW_TOOLS.filter((t) => firstPage(m, t) !== null && !(usesMainServer(ctx.workspace) && (MAIN_ONLY_TOOLS as readonly string[]).includes(t)));
     const [cards, feed] = await Promise.all([Promise.all(tools.map((t) => CARDS[t](shared))), latestFeed(shared)]);
     const enabledApps = apps.filter((a) => a.enabled);
     const act = can(m, 'inbox.edit');
@@ -619,7 +619,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
       },
       {
         state: p.discord, icon: 'message-circle', name: 'Discord', href: `${b}/setup/discord`, cta: 'Connect Discord',
-        detail: dc ? `${dc.guild_name} · ${dc.status === 'active' ? 'bot ready' : 'bot removed'}${ctx.workspace.parent_id ? ' · from the main workspace' : ''}` : ctx.workspace.parent_id ? 'The main workspace connects Discord.' : 'Add the bot to your Discord server.',
+        detail: dc ? `${dc.guild_name} · ${dc.status === 'active' ? 'bot ready' : 'bot removed'}${usesMainServer(ctx.workspace) ? ' · from the main workspace' : ''}` : ctx.workspace.parent_id ? 'The main workspace connects Discord, or connect a server of its own.' : 'Add the bot to your Discord server.',
       },
       {
         state: p.apps, icon: 'boxes', name: 'Apps & repositories', href: `${b}/apps`, cta: 'Add apps',
@@ -682,11 +682,11 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
   async function deleteCard(ctx: WorkspaceRequestContext): Promise<SafeHtml> {
     const ws = ctx.workspace;
     const [main, linked, gh, conn] = await Promise.all([mainOf(deps.db, ws), listLinked(deps.db, ws.id), getGitHubConnection(deps.db, ws.id), getDiscordConnection(deps.db, ws.id)]);
-    const discord = main
-      ? ws.on_main_panel
-        ? `Its apps leave ${main.name}’s ticket panel. Its tickets leave My tickets there.`
-        : 'Its ticket panel is taken down.'
-      : html`Its ticket panel, contributor roles panel, known-issues board and update-pings message are taken down. Release posts stay.${conn ? ` The bot stays in ${conn.guild_name ?? 'your server'}; remove it there if nothing else uses it.` : ''}`;
+    // Its panels in a server of its own (a main's, or a linked workspace's), and its apps on the main's panel.
+    const leavesMain = main && ws.on_main_panel ? `Its apps leave ${main.name}’s ticket panel. Its tickets leave My tickets there.` : '';
+    const discord = main && usesMainServer(ws)
+      ? leavesMain || 'Its ticket panel is taken down.'
+      : html`${leavesMain ? `${leavesMain} ` : ''}Its ticket panel, contributor roles panel, known-issues board and update-pings message are taken down. Release posts stay.${conn ? ` The bot stays in ${conn.guild_name ?? 'your server'}; remove it there if nothing else uses it.` : ''}`;
     const github = gh
       ? html`Its issues stay on GitHub, but screenshots added from here stop loading. The GitHub App stays installed on <a href="${installationSettingsUrl(gh)}" target="_blank" rel="noopener noreferrer">${gh.account_login}</a> until you uninstall it there.`
       : 'Nothing: it has no GitHub connection.';
@@ -742,15 +742,18 @@ export function registerWorkspaceRoutes(app: FastifyInstance, web: Web): void {
       const canOpenMain = (ctx.memberships ?? []).some((x) => x.workspace.id === main.id);
       return html`<div class="card">
         <div class="card-h"><div><h2>Linked workspace</h2><div class="desc">${ws.name} is linked to ${canOpenMain ? html`<a href="/w/${main.id}">${main.name}</a>` : main.name}.</div></div></div>
-        ${setting('Its own', null, html`<span class="value">GitHub organization, apps, ticket types, tickets, AI triage, moderation and analytics</span>`, { stacked: true })}
-        ${setting(`From ${main.name}`, null, html`<span class="value">The Discord server; contributor roles, announcements and bot features; its owner and global admins, who are admins here; and its global moderators, who are moderators here</span>`, { stacked: true })}
+        ${usesMainServer(ws)
+          ? html`${setting('Its own', null, html`<span class="value">GitHub organization, apps, ticket types, tickets, AI triage, moderation and analytics</span>`, { stacked: true })}
+            ${setting(`From ${main.name}`, null, html`<span class="value">The Discord server; contributor roles, announcements and bot features; its owner and global admins, who are admins here; and its global moderators, who are moderators here</span>`, { stacked: true })}`
+          : html`${setting('Its own', null, html`<span class="value">GitHub organization, Discord server, apps, ticket types, tickets, AI triage, moderation, analytics, contributor roles, announcements and bot features</span>`, { stacked: true })}
+            ${setting(`From ${main.name}`, null, html`<span class="value">Its owner and global admins, who are admins here, and its global moderators, who are moderators here${ws.on_main_panel ? `. Its apps are on ${main.name}’s panel too` : ''}</span>`, { stacked: true })}`}
       </div>`;
     }
     const linked = await listLinked(deps.db, ws.id);
     const github = await Promise.all(linked.map((l) => getGitHubConnection(deps.db, l.id)));
     const rows = linked.map((l, i) => {
       const gh = github[i];
-      const where = l.on_main_panel ? `On ${ws.name}’s panel` : 'Its own panel';
+      const where = !usesMainServer(l) ? `Its own server${l.on_main_panel ? ` · also on ${ws.name}’s panel` : ''}` : l.on_main_panel ? `On ${ws.name}’s panel` : 'Its own panel';
       return html`<a class="line setup-row" href="/w/${l.id}">${icon('corner-down-right', 16, 'muted')}<span class="grow"><span class="name">${l.name}</span><span class="small muted"> · ${gh ? `GitHub: ${gh.account_login}` : 'GitHub not connected'} · ${where}</span></span>${icon('chevron-right', 16, 'muted')}</a>`;
     });
     return html`<div class="card" id="linked">

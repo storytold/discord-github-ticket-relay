@@ -7,7 +7,7 @@
 import {
   addDetails, addScreenshots, closeMine, memberActions, ownSubmission, waitMinutes, MAX_NEW_FILES, MEMBER_CLOSE, type MemberCloseKey,
 } from '../domain/member-actions.js';
-import { panelWorkspaces, withScope } from '../domain/linked.js';
+import { panelWorkspaces, usesMainServer, withScope } from '../domain/linked.js';
 import { closeConfirm, detailsModal, myTicketDetail, myTicketsPage, panelTickets, screenshotsModal, statusWords, type MemberTicket } from '../domain/my-tickets.js';
 import { UserFacingError, type Deps, type WorkspaceRow } from '../domain/types.js';
 import { GitHubApiError } from '../github/client.js';
@@ -98,7 +98,7 @@ export async function handleMyTickets(deps: Deps, i: Interaction, panel: Workspa
     }
     const fresh = (await panelTickets(deps, [workspace.id], userId).catch(() => [] as MemberTicket[])).find((x) => x.ref === t.ref) ?? t;
     // A linked workspace's own panel: its buttons keep the panel's tag.
-    await deps.discord?.editOriginalResponse(i.token, withScope(edited(myTicketDetail(fresh, page, words, { actions, banner })), panel.parent_id ? panel.id : null))
+    await deps.discord?.editOriginalResponse(i.token, withScope(edited(myTicketDetail(fresh, page, words, { actions, banner })), usesMainServer(panel) ? panel.id : null))
       .catch((err) => deps.log.warn({ err: (err as Error).message }, 'my tickets reply failed'));
   };
   const later = 'Please try again in a few minutes.';

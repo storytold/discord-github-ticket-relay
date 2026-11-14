@@ -19,7 +19,7 @@
 - **Repo status and analytics:** open PRs and issues, the most reported bugs, downloads and stars over time.
 - **Discord extras:** announcements, release posts, a known-issues board, contributor roles from merged PRs.
 - **MCP:** Claude Code, Cursor, VS Code or Codex can work with tickets.
-- **Team:** owners, admins and moderators with access per page. Linked workspaces cover repositories in other GitHub organizations.
+- **Team:** owners, admins and moderators with access per page. Linked workspaces cover repositories in other GitHub organizations, on the main panel or in a Discord server of their own.
 
 Optional features stay off until an admin turns them on.
 
